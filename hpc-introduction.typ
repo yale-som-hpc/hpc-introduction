@@ -78,7 +78,24 @@ Check your job status:
 
 ```bash
 squeue -u $USER
+# or equivalently:
+squeue --me
 ```
+
+*Important:* You should regularly monitor your submitted jobs using `squeue --me`. Job states include:
+- `R` (Running): Job is currently executing
+- `PD` (Pending): Job is waiting in the queue
+- `CG` (Completing): Job is finishing up
+
+*Common issue:* If your job stays in `PD` (pending) state for an unusually long time, it often means you've requested resources that don't exist on the cluster (e.g., requesting 128GB of memory when the maximum available is 64GB, or asking for 32 CPUs when nodes only have 24). Check your resource requests and adjust them to match available hardware. Every week someone submits a job that goes `PD` forever because it's requested resources we don't have—don't be that person!
+
+To investigate why a job is pending:
+
+```bash
+squeue --me --start
+```
+
+This shows estimated start times and reasons for delay.
 
 View detailed job information:
 
@@ -100,48 +117,53 @@ sacct
 
 = Loading Software with Spack
 
-Spack is a package manager that provides access to scientific software. Instead of installing packages yourself, you load pre-compiled modules.
+Spack is a package manager that provides access to scientific software. Instead of installing packages yourself, you load pre-compiled modules using the standard module system.
 
-== Basic Spack Commands
+== Basic Module Commands
 
 === Finding Available Packages
-
-Search for packages:
-
-```bash
-spack find
-```
 
 Search for specific software (e.g., Python):
 
 ```bash
-spack find python
+module spider python
+```
+
+This shows all available versions and how to load them. For example, you might see:
+- `python/3.11.11-wepq` (load with: `module load python/3.11.11-wepq`)
+
+View all currently available modules:
+
+```bash
+module avail
 ```
 
 === Loading Packages
 
-Load a package to use it:
+Load a module to use it. You can use the short name or the full version:
 
 ```bash
-spack load python
+module load python
+# or load a specific version:
+module load python/3.11.11-wepq
 ```
 
-Load a specific version:
+View currently loaded modules:
 
 ```bash
-spack load python@3.11
+module list
 ```
 
-View currently loaded packages:
+Unload a module:
 
 ```bash
-spack find --loaded
+module unload python
 ```
 
-Unload a package:
+Unload all modules:
 
 ```bash
-spack unload python
+module purge
 ```
 
 == Using Python
@@ -149,7 +171,7 @@ spack unload python
 === Loading Python
 
 ```bash
-spack load python
+module load python
 ```
 
 === Python Virtual Environments
@@ -158,7 +180,7 @@ It's recommended to use virtual environments for your projects:
 
 ```bash
 # Load Python
-spack load python
+module load python
 
 # Create a virtual environment
 python -m venv ~/myproject_env
@@ -181,7 +203,7 @@ pip install numpy pandas matplotlib scikit-learn
 #SBATCH --mem=16G
 
 # Load Python
-spack load python
+module load python
 
 # Activate virtual environment
 source ~/myproject_env/bin/activate
@@ -195,7 +217,7 @@ python analysis.py
 === Loading R
 
 ```bash
-spack load r
+module load r
 ```
 
 === Installing R Packages
@@ -203,7 +225,7 @@ spack load r
 You can install R packages in your home directory:
 
 ```bash
-spack load r
+module load r
 R
 
 # In R console:
@@ -222,7 +244,7 @@ install.packages("ggplot2", repos="https://cloud.r-project.org")
 #SBATCH --mem=16G
 
 # Load R
-spack load r
+module load r
 
 # Run your script
 Rscript analysis.R
@@ -233,11 +255,11 @@ Rscript analysis.R
 A typical workflow looks like:
 
 + Connect to HPC: `ssh <netid>@hpc.som.yale.edu`
-+ Load required software: `spack load python`
++ Load required software: `module load python`
 + Prepare your scripts and data
 + Create a job submission script
 + Submit the job: `sbatch my_job.sh`
-+ Monitor progress: `squeue -u $USER`
++ Monitor progress: `squeue --me`
 + Review results in output files
 
 = Best Practices
@@ -250,7 +272,9 @@ A typical workflow looks like:
 
 = HPC Etiquette: Common Faux Pas to Avoid
 
-The HPC is a shared resource. Following good etiquette ensures everyone can use the cluster effectively:
+The HPC is a shared resource. Following good etiquette ensures everyone can use the cluster effectively.
+
+*Note:* Resource usage is public information—anyone can see who is using what resources with `squeue`. If you're not a good HPC citizen, expect emails from other users who are waiting for resources!
 
 == Don't Hog Resources
 
@@ -372,8 +396,8 @@ echo "Running on node: $(hostname)"
 echo "Job ID: $SLURM_JOB_ID"
 echo "=========================================="
 
-# Load Python from Spack
-spack load python
+# Load Python
+module load python
 
 # Run the Python script
 # You can change the argument to compute more Fibonacci numbers

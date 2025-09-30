@@ -13,8 +13,8 @@ echo "Running on node: $(hostname)"
 echo "Job ID: $SLURM_JOB_ID"
 echo "=========================================="
 
-# Load Python from Spack
-spack load python
+# Load Python
+module load python
 
 # Run the Python script
 # You can change the argument to compute more Fibonacci numbers
