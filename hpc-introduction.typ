@@ -22,30 +22,29 @@
 ]
 
 #align(center)[
-  #text(size: 20pt, weight: "bold")[Introduction to the Yale SOM HPC]
-  #v(0.5em)
-  #text(size: 12pt)[A guide for researchers whose code has, until now, lived on a laptop]
-  #v(1em)
+  #text(size: 20pt, weight: "bold")[Introduction to the Yale SOM HPC] \
   #image("slurm-logo.png", width: 35%)
 ]
 
 #v(1em)
 
-#outline(depth: 1, indent: auto)
+#block(width: 100%, inset: (x: 0pt, y: 4pt))[
+  #text(weight: "bold")[Abstract.] This guide introduces the Yale SOM "High
+  Performance Computing" cluster--- a shared computing environment 
+  for SOM researchers.
+  The cluster (or "the HPC") is a great place to get work done that doesn't fit on
+  your laptop. This guide explains how to use the HPC skillfully whilst
+  simultaneously
+  being a good steward of this shared and lightly regulated resource.
+  There is a companion
+  #link("https://github.com/yale-som-hpc/claude-code-marketplace")[set of Claude Code skills]
+  for AI agents that contains more details. If your AI agents are aiding
+  you in your HPC work, be sure to load those skills.
+]
 
 #v(1em)
 
-#skillref(("overview", "managing-jobs"))[
-  This guide has a companion: the Yale SOM
-  #link("https://github.com/yale-som-hpc/claude-code-marketplace")[Claude Code marketplace],
-  a plugin that ships fifteen skills — AI-facing counterparts to the
-  sections below, covering `overview`, `managing-jobs`, `using-gpus`,
-  `running-python`, `running-r`, `acquiring-data`, and the rest. When you
-  ask Claude Code to do something on the cluster, it loads the matching
-  skill and follows the same conventions this document teaches you.
-  Each section ends with a callout naming the relevant skill or skills;
-  Section 18 has the full map and install instructions.
-]
+#outline(depth: 1, indent: auto)
 
 #pagebreak()
 
