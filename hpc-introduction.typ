@@ -50,106 +50,77 @@
 
 = What is an HPC, and why use one?
 
-On a laptop, you have a fixed budget of cores, memory, and time, and you control all three. Once the
-job exceeds any one of them, you wait. The Yale SOM HPC exists to give
-you a much larger budget — and to give it to you on terms set by a
-shared scheduler rather than by your hardware.
+The Yale SOM HPC is where you send work that has outgrown your laptop.
+The price of that extra capacity is that you now launch work through a shared
+scheduler instead of running directly, at will, on hardware you own.
 
-An HPC ("high-performance computing") cluster is a collection of large
-servers — _compute nodes_ — sitting in a data center, sharing a fast
-filesystem, and managed by a _job scheduler_ that hands out CPU cores,
-memory, GPUs, and time to many users at once. The Yale SOM cluster
-lives at `hpc.som.yale.edu`. You log in to a small _login node_, and
-all real work runs on the compute nodes after the scheduler grants you
-a slot.
+The HPC is in the basement of Evans Hall roughly under Zhang
+Auditorium.  It looks like a bunch of pizza-box-shaped servers/computers,
+stacked in racks, connected with cables.  Most of those servers are
+_compute nodes_; one server acts as a _login node_ or _head node_. All
+these nodes share a fast filesystem and are managed by a _job
+scheduler_ that allocates CPU cores, memory, GPUs, and time across
+many users. The Yale SOM cluster lives at `hpc.som.yale.edu` on the
+internet, but you can only access it from the campus network or
+Yale VPN.
 
-The cluster is the right tool when at least one of five things is true:
-your data does not fit in your laptop's RAM; a run takes long enough
-that you do not want to babysit your laptop through it; you want to
-run the same script hundreds of times with different parameters in
-parallel; you need a GPU you do not own; or the work is sensitive
-enough that it should live on Yale-managed storage rather than a
-personal device. The cluster is _not_ the right tool for a 30-second
-script, for interactive plotting, or for work that fits comfortably on
-the machine you already have. The right move is to migrate to the
-cluster when the laptop stops being enough, not out of habit.
 
-This guide does two things. First, it explains the mental model — what
-is different about a shared, scheduled, multi-tenant compute
-environment, and why almost every operational rule on the cluster
-follows from that one fact. Second, it provides the practical recipes
-— Slurm scripts, module loads, file-transfer patterns, language-specific
-workflows — you will use every day.
+You want to use the cluster when your laptop has become the wrong
+tool: the data no longer fits in RAM; programs take too long to
+babysit; your script needs to run hundreds of times with different
+parameters; the work needs a GPU you do not own; or you need to
+share some "biggish" data with SOM colleagues.  You should not move
+a 30-second script to the cluster just because the cluster exists.
+Indeed, you'll be unhappy with the outcome! On your laptop/desktop,
+you're the boss and you don't need to think about *how* to run a
+job or be inconvenienced by other users. You should only move to
+the HPC if you have to.
 
-We structure the rest of the guide as follows. Sections 2–4 cover the
-mental model, the login-versus-compute distinction, and how to
-connect. Sections 5–7 cover Slurm, the post-job feedback loop, and the
-filesystem. Sections 8–9 cover moving files in and out and installing
-software. Sections 10–12 cover Python, R, and Stata. Sections 13–15
-cover GPUs, larger-than-memory data, and acquiring data from outside
-the cluster. Sections 16–17 cover project setup and etiquette. Section
-18 explains how this guide pairs with the Claude Code marketplace,
-which encodes the same conventions for the AI you delegate to. Section
-19 lists the commands and contacts to keep at hand, and the appendix
-gives a complete first-job example.
+This guide has two jobs. First, it gives the mental model for a shared,
+scheduled, multi-tenant system. Most cluster rules follow from that model.
+Second, it gives the recipes you will reuse: Slurm scripts, module loads,
+file-transfer patterns, language-specific workflows, and post-job checks.
 
-#skillref(("overview",))[
-  The `overview` skill is the AI's version of this section. When you
-  ask Claude Code to do anything on the cluster without specifying
-  further, it loads `overview` first to get its bearings.
-]
+The rest of the guide moves from concepts to practice. Sections 2–4 cover
+the shared-instrument model, login versus compute nodes, and secure
+connections. Sections 5–7 cover Slurm, resource right-sizing, and the
+filesystem. Sections 8–9 cover file movement and software installation.
+Sections 10–12 cover Python, R, and Stata. Sections 13–15 cover GPUs,
+larger-than-memory data, and data acquisition. Sections 16–17 cover project
+setup and etiquette. Section 18 explains how this guide pairs with the
+Claude Code marketplace. Section 19 collects the commands and contacts to
+keep nearby, and the appendix gives a complete first-job example.
 
-= The mental model: a shared instrument
+= The mental model: a shared computer
 
-The single biggest adjustment from working locally is that the HPC is
-shared, right now, with everyone else in SOM. Your laptop is yours.
-Latency is zero, nothing is queued, and you never wait for jobs to run. The HPC is the opposite of all of those, and operational rules on the
-cluster follow from this difference.
-
-To see what that means in practice, four facts are worth keeping in
-mind together. CPUs, memory, and GPUs are a finite pool divided across
-many users, so an inflated request makes _you_ wait longer in the
-queue _and_ blocks someone else. Resources are also reserved up front
-rather than discovered at runtime — you declare what you need before a
-job starts, and Slurm enforces the declaration by killing any job that
-exceeds it. Usage is public; `squeue` shows what every user on the
-cluster is running, so a 64-CPU job left idle overnight is visible by
-name to the people waiting behind it. And side effects propagate:
-millions of tiny files slow the GPFS metadata server for everyone, an
-aggressive scraper gets the cluster's outbound IP blocked for
-everyone, and a misbehaving login-node process lags everyone else's
-editor.
-
-The Yale SOM HPC marketplace summarizes the implications as two
-pillars. _Be polite_: do not hog, do not sit idle, do not trash GPFS
-metadata, do not get the cluster IP-blocked. _Be skillful_: right-size
-requests, control threads, cache expensive work, make outputs
-resumable, and inspect resource use after every serious job.
-Everything that follows in this guide is an elaboration on one or the
-other.
+The cluster is shared environment: there's a bunch of us on there,
+we all want to get work done, and we need to be considerate to each
+other if that is going to happen. Our resource scheduling software---Slurm---helps
+us in this regard. With Slurm, each of us can say what we think we need
+to get our research done and Slurm will make it happen in the most efficient
+and fair way that it can. Of course, that often means there's a little bit
+of waiting to get the CPUs, GPUs, or RAM that you want.
 
 = Login nodes vs compute nodes
 
-When you `ssh` to the cluster, you land on a _login node_. The login
-nodes are small machines shared by every logged-in user, and they
-exist for editing files, running `git`, browsing modules with `module
-spider`, doing small package installs, and submitting jobs. They are
-not for running an analysis, training a model, loading a 5 GB CSV into
-pandas, or anything else that pegs a CPU or holds significant RAM.
-When someone runs heavy compute on a login node, every other user's
-editor lags and the sysadmins notice.
+The login node is the front desk of the basement machine, not the workshop.
+Use it to check in, edit files, run `git`, browse modules with
+`module spider`, perform small setup steps, and submit jobs. Do not use it to
+run analyses, train models, load a 5 GB CSV into pandas, or hold significant
+RAM. When one person runs heavy compute on the login node, everyone else's
+shell gets slow. It is super frustrating!
 
-The right way to "just try something quickly" is an interactive job on
-a compute node:
+The right way to "just try something quickly" is an interactive job on a
+compute node:
 
 ```bash
 srun --partition=cpunormal --cpus-per-task=2 --mem=8G --time=01:00:00 --pty bash
 ```
 
-This allocates two cores, 8 GB of memory, and one hour of walltime,
-and drops you into an interactive shell on a real compute node. Exit
-the moment you are done — `Ctrl+D` or `exit` — rather than letting it
-sit open while you go to a meeting.
+This reserves two cores, 8 GB of memory, and one hour of walltime, then
+puts you in a shell on a real compute node. When you are done, leave with
+`Ctrl+D` or `exit`. An interactive allocation left open during a meeting is
+still an allocation.
 
 #skillref(("overview", "managing-jobs"))[
   Claude Code knows not to run heavy commands on the login node, and
@@ -159,42 +130,41 @@ sit open while you go to a meeting.
 
 = Connecting to the cluster
 
-The basic form of connecting is the same as any SSH session:
+Connect to the cluster with SSH:
 
 ```bash
 ssh <your-netid>@hpc.som.yale.edu
 ```
 
-That works, but for daily use it is worth three small upgrades. First,
-generate an SSH key with a passphrase on your laptop using
-`ssh-keygen -t ed25519`, and copy only the public half to the cluster
-with `ssh-copy-id <netid>@hpc.som.yale.edu`. Never copy your private
-key (`id_ed25519`) onto GPFS. Second, run an SSH agent — `ssh-agent`
-on Linux, the macOS keychain on a Mac — so that you type the
-passphrase once per session. Third, add a host block to
-`~/.ssh/config` so that the full hostname is no longer required:
+For daily work, make three small improvements. First, create an SSH key on
+your laptop with `ssh-keygen -t ed25519`, protect it with a passphrase, and
+copy only the public key to the cluster with
+`ssh-copy-id <netid>@hpc.som.yale.edu`. Never copy the private key
+(`id_ed25519`) onto GPFS. Second, use an SSH agent — `ssh-agent` on Linux
+or the macOS keychain on a Mac — so you type the passphrase once per session.
+Third, add a host
+block to `~/.ssh/config` so you can type `ssh hpc` instead of the full
+hostname:
 
 ```sshconfig
-Host somhpc
+Host hpc
   HostName hpc.som.yale.edu
   User <your-netid>
 ```
 
-Enable `ForwardAgent yes` only when you need it for GitHub or another
-SSH hop. Agent forwarding is convenient, but any process on the remote
-host can ask your agent to sign while that connection is active. For
-GitHub from the cluster, prefer `gh auth login` when the GitHub CLI is
-available; carefully scoped agent forwarding is the alternative. If
-GitHub auth worked yesterday and fails today inside `tmux`, do not copy
-keys to the cluster. Start a fresh SSH login or refresh `SSH_AUTH_SOCK`;
-the socket path went stale, not the private key.
+Use `ForwardAgent yes` only when you need it, usually for GitHub or another
+SSH hop. Agent forwarding is useful, but it is not magic: while the
+connection is open, the remote host can ask your laptop's agent to sign. If
+GitHub authentication worked yesterday and fails today inside `tmux`, do
+not copy keys to the cluster. Start a fresh SSH login or refresh
+`SSH_AUTH_SOCK`; the socket path went stale, not the private key.
 
-You must be on a Yale network path — campus network or Yale VPN — to
-reach the cluster. Fix network access before debugging keys. Only SSH
-to a compute node after Slurm has allocated that node to you; use the
-hostname printed inside the allocation, then tunnel to that node for
-Jupyter or VS Code. Do not run notebook kernels or heavy editor
-extensions on the login node.
+You must reach the cluster from a Yale network path: campus network or Yale
+VPN. If you are at home and SSH just hangs, check the VPN before accusing
+your keys. SSH to a compute node only after Slurm has allocated that node to
+you; use the hostname printed inside the allocation, then tunnel to that node
+for Jupyter or VS Code. Notebook kernels and heavy editor extensions belong
+on compute nodes, not the login node.
 
 #skillref(("connecting-securely",))[
   Full recipes for SSH keys, agent forwarding, stale agent sockets,
@@ -205,13 +175,12 @@ extensions on the login node.
 
 = The job scheduler: thinking in jobs, not processes
 
-On your laptop you run a process — `python script.py` — and it starts
-immediately. On the HPC you submit a _job_: a description of what
-resources you need and what to run with them. Slurm queues the job,
-finds a compute node with a slot that fits, and only then starts your
-code. If your job tries to use more memory or time than you declared,
-Slurm kills it. The contract is simple: you predict what you need;
-Slurm enforces it.
+On your laptop, `python script.py` starts a process. On the cluster, you
+submit a _job_: a resource request plus the commands to run. Think reservation
+system, not magic shell. Slurm queues the job, finds a node where the request
+fits, and starts it there. If the job uses more memory or time than you
+promised, Slurm kills it. That is the contract: you estimate; Slurm
+enforces.
 
 The contract has four axes — CPU cores, memory, walltime, and GPUs —
 declared with the directives in Table 1.
@@ -232,27 +201,23 @@ declared with the directives in Table 1.
   kind: table,
 )
 
-A fifth knob, `--ntasks`, is the one most likely to confuse a new user.
-The plain-English distinction is that `--ntasks=N` requests N
-independent processes, typically MPI ranks, while `--cpus-per-task=N`
-requests N cores assigned to a single process so it can run threads.
-SOM workflows are almost never MPI, so almost every sbatch script
-should start with `--ntasks=1 --cpus-per-task=N`. Reach for
-`--ntasks>1` only when you have multiple cooperating processes.
+The fifth knob, `--ntasks`, causes the most confusion. Use `--ntasks=N`
+when you need N cooperating processes, usually MPI ranks. Use
+`--cpus-per-task=N` when one process needs N CPU cores for threads. Most
+SOM jobs are not MPI jobs, so most sbatch scripts should say
+`--ntasks=1 --cpus-per-task=N`. Reach for `--ntasks>1` only when you know
+why multiple processes must cooperate.
 
-A _partition_ is a queue tied to a particular set of nodes. The SOM
-cluster currently exposes five. The default, `default_queue`, mixes
-CPU-only and A40 GPU nodes and caps walltime at four hours, which
-makes it well-suited to short tests and most interactive work.
-`cpunormal` is CPU-only with longer walltimes and is the workhorse for
-batch CPU jobs. `gpunormal` carries RTX 8000 and A100 GPUs. The
-`h100` partition is a single node with four H100 GPUs and is the
-scarcest resource on the cluster — every H100-hour you take is compute
-someone else cannot use. The `build` partition exists for compiling
-software. The live view is `sinfo -s`, which is worth running before
-any production submission.
+A _partition_ is a queue tied to a set of nodes. The SOM cluster currently
+exposes five. `default_queue` mixes CPU-only and A40 GPU nodes and caps
+walltime at four hours, so it is good for short tests and much interactive
+work. `cpunormal` is the CPU-only workhorse for longer batch jobs.
+`gpunormal` carries RTX 8000 and A100 GPUs. `h100` is one node with four
+H100 GPUs; treat it as scarce because it is. `build` exists for compiling
+software. Before production submissions, check the live view with
+`sinfo -s`.
 
-A minimal sbatch script that puts the contract on paper looks like:
+A minimal sbatch script puts the contract in one file:
 
 ```bash
 #!/bin/bash
@@ -276,50 +241,46 @@ hostname
 python --version
 ```
 
-The thread-environment block matters more than it looks; we return to
-it in Section 10. Submit with `sbatch my_job.sh`, monitor your queue
-with `squeue --me`, inspect a particular job with `scontrol show job
-<id>`, and cancel with `scancel <id>`. Job states you will see in
-practice are `R` (running), `PD` (pending in the queue), and `CG`
-(completing).
+The thread-environment block matters more than it looks; Section 10 explains
+why. Submit with `sbatch my_job.sh`, watch your jobs with `squeue --me`,
+inspect one job with `scontrol show job <id>`, and cancel with
+`scancel <id>`. The states you will see most often are `R` (running), `PD`
+(pending), and `CG` (completing).
 
 If `sbatch job.sh` fails with `bad interpreter`, `: not found`, or
 `$'\r'`, the script has Windows CRLF line endings. Fix it with
-`dos2unix job.sh`, or with `sed -i 's/\r$//' job.sh` if `dos2unix` is
-not installed, and configure your editor to write LF for `.sh` files.
+`dos2unix job.sh`, or with `sed -i 's/\r$//' job.sh` if `dos2unix` is not
+installed, and configure your editor to write LF for `.sh` files.
 
-Interactive sessions are for debugging, not unattended work. Use the
-smallest allocation that lets you debug, put a short time limit on it,
-and exit the moment you are done:
+Interactive sessions are for debugging, not unattended work. Ask for the
+smallest allocation that lets you debug, set a short time limit, and exit
+when you are finished:
 
 ```bash
 srun --partition=cpunormal --cpus-per-task=2 --mem=8G --time=01:00:00 --pty bash
 ```
 
-If a job sits in `PD` for an unusually long time, ask why. The right
-diagnostic is `squeue --me --start`, which gives the estimated start
-time and the queueing reason, followed by `scontrol show job <id>` for
-the full record. The most common cause of pending forever is
-requesting resources that do not exist on any node: 256 GB of RAM
-when the largest node has 192 GB, or 64 cores on partitions whose
-nodes top out at 48. Slurm queues such a job indefinitely without
-warning that it is impossible. Match the request to real hardware by
-inspecting `sinfo -s` and `scontrol show node`.
+If a job sits in `PD` for too long, ask Slurm why. Start with
+`squeue --me --start` for the estimated start time and queueing reason, then
+use `scontrol show job <id>` for the full record. The common trap is asking
+for resources that do not exist on any node: for example, 256 GB of RAM when
+the largest node has 192 GB, or 64 cores on partitions whose nodes top out
+at 48. Slurm may queue that job forever rather than telling you it is
+impossible. Match requests to real hardware with `sinfo -s` and
+`scontrol show node`.
 
-After a job finishes, `sacct -j <id>` reports its history with
-whatever columns you ask for:
+After a job finishes, `sacct -j <id>` reports its history with the columns
+you choose:
 
 ```bash
 sacct -j <id> --format=JobID,JobName,State,Elapsed,MaxRSS,ReqMem,AllocCPUS
 ```
 
-Two patterns worth knowing about up front cover most of the structured
-work on a cluster. _Job arrays_ answer "I want to run this script 500
-times with different parameters" — add `#SBATCH --array=1-500%50` and
-the `%50` caps concurrent tasks at 50, leaving slots for other users;
-inside the script, `$SLURM_ARRAY_TASK_ID` is the index. _Dependencies_
-answer "B should start when A finishes": `sbatch
---dependency=afterok:<jobid-of-A> B.sh`.
+Two Slurm patterns cover much of research computing. _Job arrays_ run the
+same script many times with different indexes: add `#SBATCH --array=1-500%50`,
+where `%50` limits concurrency to 50 tasks, and read the index from
+`$SLURM_ARRAY_TASK_ID`. _Dependencies_ express order: submit B only after A
+succeeds with `sbatch --dependency=afterok:<jobid-of-A> B.sh`.
 
 #skillref(("managing-jobs", "self-diagnosing-resource-use"))[
   The `managing-jobs` skill has the full pattern library — array
@@ -329,36 +290,33 @@ answer "B should start when A finishes": `sbatch
 
 = Right-sizing: the post-job feedback loop
 
-Resource requests are guesses. The discipline that distinguishes a
-skillful HPC user from a wasteful one is checking the guess after the
-job finishes and adjusting next time. Two commands do most of the work:
+Every resource request is a forecast. The skillful habit is to compare the
+forecast with what happened and make the next request tighter. Two commands
+do most of the work:
 
 ```bash
 seff <job-id>
 sacct -j <job-id> --format=JobID,Elapsed,MaxRSS,ReqMem,AllocCPUS,State
 ```
 
-What does "good" look like on the resulting numbers? CPU efficiency
-above about 50% is reasonable for CPU-bound work; 10-50% often means
-I/O-bound work or an over-request; below 10% is probably wasteful. If
-CPU efficiency is low, request fewer CPUs or fix the parallelism before
-scaling up. For memory, set the next `--mem` to roughly 1.5-2× the
-observed peak `MaxRSS`, not 10×. If you asked for 128 GB and used 4 GB,
-you removed 124 GB from everyone else's available pool for no reason.
-Walltime should come from a sample-data extrapolation; if work is
-resumable, prefer 1-4 hour chunks that can backfill into idle slots
-rather than one multi-day job.
+For CPU-bound work, CPU efficiency above about 50% is reasonable. Efficiency
+between 10% and 50% often means I/O-bound work or an over-request. Below
+10% usually means waste. If CPU efficiency is low, request fewer CPUs or fix
+the parallelism before scaling up. For memory, set the next `--mem` to about
+1.5-2× the observed peak `MaxRSS`, not 10×. If you requested 128 GB and used
+4 GB, Slurm reserved 124 GB for you that your code never touched. For
+walltime, extrapolate from a sample run. If the work is resumable, prefer
+1-4 hour chunks that can backfill into idle slots over one multi-day job.
 
 Treat future caps as if they already exist. SOM HPC is still lightly
-enforced compared with many clusters, but hard per-user CPU, memory,
-GPU, or interactive limits are the natural direction for a shared
-instrument. Right-sizing now keeps your work schedulable later.
+enforced compared with many clusters, but shared systems naturally move
+toward hard per-user CPU, memory, GPU, or interactive limits. Right-sized
+work stays schedulable when that happens.
 
-Why bother? Over-requesting is not free. It costs _you_ a longer queue
-because Slurm has to find a bigger empty slot for your job, and it
-costs other users the resources sitting idle inside your allocation.
-Inspect every serious job; adjust the next submission. The habit is
-worth more in the aggregate than any single performance optimization.
+Over-requesting is not harmless. It makes you wait longer because Slurm
+must find a larger empty slot, and it withholds idle resources from people
+behind you. Inspect every serious job; adjust the next submission. The habit
+pays off more reliably than any one clever optimization.
 
 #skillref(("self-diagnosing-resource-use",))[
   Ask Claude Code "did my last job use what it asked for?" and it
@@ -368,11 +326,11 @@ worth more in the aggregate than any single performance optimization.
 
 = The filesystem zoo
 
-Your laptop has one disk. The cluster has several filesystems, with
-different rules and lifetimes, summarized in Table 2. Knowing which
-is which is the difference between a workflow that runs cleanly and
-one that quietly fills `$HOME`, breaks shared metadata, or loses
-intermediates when a node reboots.
+The cluster has several filesystems because one storage policy cannot serve
+every job. Pick the right one before you start. Otherwise you will fill
+`$HOME`, punish shared metadata, or lose intermediates when a node reboots.
+The basement machine has more than one closet; do not put everything in the
+coat closet.
 
 #figure(
   table(
@@ -398,34 +356,31 @@ intermediates when a node reboots.
   kind: table,
 )
 
-The implications are short. Code lives in `$HOME` or in `code/` under
-your project; data lives under `/gpfs/project/<proj>/data/` or
-`/gpfs/scratch60/$USER/`. `$HOME` is small and is the wrong place for
-200 GB of intermediate files. `/gpfs/scratch60/$USER` may not exist
-until you create it with `mkdir -p /gpfs/scratch60/$USER`. Scratch is a
-staging area, not an archive — clean it when work is done.
+The short version: code lives in `$HOME` or in `code/` under project space;
+data lives under `/gpfs/project/<proj>/data/` or `/gpfs/scratch60/$USER/`.
+`$HOME` is small and is the wrong place for 200 GB of intermediates.
+`/gpfs/scratch60/$USER` may not exist until you create it with
+`mkdir -p /gpfs/scratch60/$USER`. Scratch is a motel, not a museum: use it,
+then clean it.
 
 == The metadata-storm warning
 
-GPFS is good at large files and bad at millions of tiny ones. Every
-file creation, listing, or stat call hits a metadata server shared by
-every user on the cluster. A workflow that writes one output file per
-row of a 2-million-row dataset will slow `ls` for every user,
-including the sysadmins, until you stop. Three counter-patterns cover
-most of the situations where this comes up: write Parquet rather than
-per-row CSVs; tar or zip directories of small files when you are done
-with them; and for "many small intermediates inside a single job,"
-write to the compute node's `/tmp` and copy a single tarball back to
-GPFS at the end.
+GPFS is fast at streaming large files and bad at being handed millions of
+tiny chores. Every file creation, directory listing, and `stat` call touches
+a metadata server shared by the cluster. A job that writes one file per row
+of a 2-million-row dataset can make `ls` slow for everyone.
+
+Use three counter-patterns. Write Parquet instead of per-row CSVs. Tar or
+zip directories of small files when you are done with them. For many small
+intermediates inside one job, write them to the compute node's `/tmp`, then
+copy one tarball or final output back to GPFS.
 
 == Atomic writes and resumable outputs
 
-Jobs can be killed. You exceed memory, the wallclock runs out, or the
-node reboots for maintenance. If your script writes results directly
-to `output.parquet` and is killed halfway, you now have a half-written
-`output.parquet` that looks like a finished file but is not. The safe
-pattern is to write to a temporary path on the same filesystem and
-then rename:
+Jobs can die halfway through a write: memory limit, walltime, preemption,
+maintenance, or plain bugs. If the script writes directly to
+`output.parquet`, a half-written file may look finished. Write to a temporary
+path on the same filesystem, then rename:
 
 ```python
 import os
@@ -434,16 +389,15 @@ df.write_parquet(tmp)
 os.replace(tmp, "output.parquet")  # atomic on the same filesystem
 ```
 
-Combine this with skip-if-exists at the top of each unit of work and
-the pipeline becomes resumable: re-running the same script after a
-kill or a crash picks up where it left off rather than restarting from
-zero. For arrays, the usual shape is one output file per task — for
-example `output/task_0001.parquet`, `output/task_0002.parquet` — then a
-final combine step. That is far better than thousands of per-row CSVs
-and safer than many tasks mutating one large file in place.
+Pair atomic writes with skip-if-exists at the top of each unit of work. Then
+a killed job can be rerun and will pick up where it left off. For arrays,
+the usual shape is one output per task — for example,
+`output/task_0001.parquet`, `output/task_0002.parquet` — followed by a final
+combine step. That is much better than thousands of per-row CSVs and safer
+than many tasks mutating one large file in place.
 
-For high-I/O work inside one job, stage onto compute-node `/tmp` and
-copy only final outputs back to GPFS:
+For high-I/O work inside one job, stage onto compute-node `/tmp` and copy
+only final outputs back to GPFS:
 
 ```bash
 workdir=$(mktemp -d "${TMPDIR:-/tmp}/job_${SLURM_JOB_ID:-local}.XXXXXX")
@@ -459,9 +413,9 @@ wait "$job_pid"
 cp "$workdir/output.parquet" /gpfs/project/<proj>/output/
 ```
 
-The `cmd & wait $!` shape lets bash run the cleanup trap when Slurm
-sends `SIGTERM` near the time limit. `SIGKILL` still bypasses traps,
-which is why `/tmp` is only scratch.
+The `cmd & wait $!` shape lets bash run the cleanup trap when Slurm sends
+`SIGTERM` near the time limit. `SIGKILL` still bypasses traps, which is why
+`/tmp` is only scratch.
 
 #skillref(("using-the-filesystem", "working-with-large-data"))[
   `using-the-filesystem` has the full pattern library;
@@ -471,29 +425,28 @@ which is why `/tmp` is only scratch.
 
 = Moving files in and out of the HPC
 
-A new user's first concrete obstacle is rarely Slurm. It is getting an
-existing codebase and dataset onto the cluster in the first place, and
-getting results back off. Three situations cover most of what comes up.
+A new user's first obstacle is often not Slurm. It is getting code and data
+onto the cluster, then getting results back off. Most cases fit one of the
+patterns below.
 
 == I already have a codebase locally
 
-Use Git, not `scp`. Push your repo to GitHub or to Yale's GitHub
-Enterprise, and on the cluster:
+Use Git for code. Do not hand-carry a codebase to the basement with `scp` if
+Git can do the job cleanly. Push the repository to GitHub or Yale's GitHub
+Enterprise, then clone it in project space:
 
 ```bash
 cd /gpfs/project/<proj>/
 git clone git@github.com:<you>/<repo>.git code
 ```
 
-From then on, you edit anywhere — laptop, cluster shell, VS Code
-Remote-SSH — and `git pull` and `git push` keep the two in sync. Two
-free wins follow that are worth stating explicitly. The first is an
-off-cluster backup of your code, with no admin involved: the SOM HPC
-does not give you user-controlled backups of `$HOME` or
-`/gpfs/project/`, but if your code is on GitHub then a cluster outage
-is irrelevant to your code's safety. The second is version history
-for the inevitable "what did I change last week." Commit before each
-serious run, print the commit hash into your job log, and `git` `bisect` when a result stops reproducing.
+From then on, edit wherever you work — laptop, cluster shell, VS Code
+Remote-SSH — and use `git pull` and `git push` to synchronize. This gives
+you two useful things for free. First, your code has an off-cluster backup;
+if the cluster has a bad day, GitHub still has the repository. Second, you
+get history for the inevitable "what changed last week?" Commit before each
+serious run, print the commit hash into the job log, and use `git bisect`
+when a result stops reproducing.
 
 == I have a dataset on my laptop
 
@@ -503,30 +456,28 @@ For one-shot transfers, `scp` is fine:
 scp local.csv somhpc:/gpfs/project/<proj>/data/
 ```
 
-For anything large, slow, or interruption-prone — which means most
-real datasets — prefer `rsync`, which resumes:
+For anything large, slow, or interruption-prone, use `rsync` because it can
+resume:
 
 ```bash
 rsync -avP --partial local_dir/ somhpc:/gpfs/project/<proj>/data/
 ```
 
-Do not check data into Git. That is what `/gpfs/project/` is for. (Git
-LFS exists; it is rarely worth the trouble for SOM workflows.)
+Do not check data into Git. That is what `/gpfs/project/` is for. Git LFS
+exists, but it is rarely worth the trouble for SOM workflows.
 
 == I have results on the cluster I want back
 
-Same tools, reversed direction:
+Use the same tools in the other direction:
 
 ```bash
 rsync -avP --partial somhpc:/gpfs/project/<proj>/output/ ./output/
 ```
 
-VS Code Remote-SSH makes single-file fetches transparent — opening
-the file in the remote editor downloads it as needed. The pattern
-worth avoiding is pulling thousands of small output files
-individually; tar them on the cluster first, both to spare GPFS
-metadata (Section 7) and to make the transfer one fast operation
-rather than thousands of slow ones:
+VS Code Remote-SSH can fetch individual files transparently when you open
+them. The pattern to avoid is pulling thousands of small output files one by
+one. Tar them on the cluster first, both to spare GPFS metadata and to make
+the transfer one fast operation instead of thousands of slow ones:
 
 ```bash
 tar -czf results.tar.gz output/
@@ -536,17 +487,17 @@ then `scp` the one tarball.
 
 == I want to fetch from a public URL
 
-`wget` or `curl` straight onto `/gpfs/project/`, ideally from a
-compute node so the login node is not tied up. The cluster's outbound
-IP is shared, so credentialed downloads, APIs, and rate-limiting
-deserve the more careful treatment we give them in Section 15.
+Use `wget` or `curl` to write directly into `/gpfs/project/`, preferably
+from a compute node so the login node is not occupied. The cluster's
+outbound IP is shared, so credentialed downloads, APIs, and rate-limited
+services need the care described in Section 15.
 
 == What does not belong on the HPC
 
-Final-output PDFs, slide decks, Overleaf projects, and manuscript
-drafts belong on your laptop, in Overleaf, or in Dropbox. The cluster
-is for compute and the data feeding it. Build the figure on the
-cluster, copy it to your laptop, drop it into the paper.
+Final PDFs, slide decks, Overleaf projects, and manuscript drafts belong on
+your laptop, in Overleaf, or in Dropbox. The cluster is for compute and the
+data feeding it. Build the figure on the cluster; copy it out before putting
+it in the paper.
 
 #skillref(("connecting-securely", "using-the-filesystem", "starting-a-new-project"))[
   Ask Claude Code to "clone my GitHub repo into project space and set
@@ -555,34 +506,33 @@ cluster, copy it to your laptop, drop it into the paper.
 
 = Software: modules, environments, and no sudo
 
-The biggest software difference from your laptop is that you do not
-have `sudo`. You cannot `apt install`, `brew install`, or `pip install
---system` your way out of a problem. Software on the cluster comes in
-three layers, in roughly this order of preference: cluster-managed
-modules, user-space environments, and containers.
+On the cluster, you do not have `sudo`. The basement servers are not your
+MacBook with a bigger fan. You cannot solve software problems with
+`apt install`, `brew install`, or `pip install --system`. Use three layers
+instead, in this order: cluster-managed modules, project-local environments,
+and containers.
 
-The first layer is _modules_, served by Lmod and built behind the
-scenes with Spack. Find software with `module spider <name>`, load it
-with `module load <name>`, view the current environment with `module
-list`, and clear inherited state with `module purge`. Git, R, Stata,
-CUDA, MATLAB, Apptainer, and sometimes Python are module-provided;
-load required modules explicitly in scripts rather than relying on
-your interactive shell.
+The first layer is _modules_, served by Lmod and built behind the scenes
+with Spack. Search with `module spider <name>`, load with
+`module load <name>`, inspect the current environment with `module list`, and
+clear inherited state with `module purge`. Git, R, Stata, CUDA, MATLAB,
+Apptainer, and sometimes Python are module-provided. Load required modules
+inside scripts; do not rely on whatever happened to be loaded in your login
+shell.
 
-The second layer is _project-local environments_. For Python, the
-current default is `uv`: it is fast on GPFS, creates a `.venv/`, and
-commits a lockfile (`uv.lock`) that reproduces the environment. Avoid
-`pip install --user`, avoid package installs inside jobs or job arrays,
-and do not share one `$HOME`-level environment across unrelated
-projects. For R, use `renv` per project and restore once during setup,
-not inside hundreds of jobs.
+The second layer is _project-local environments_. For Python, the current
+default is `uv`: it is fast on GPFS, creates a `.venv/`, and writes a
+`uv.lock` file that reproduces the environment. Avoid `pip install --user`,
+avoid installs inside jobs or job arrays, and do not share one `$HOME`-level
+environment across unrelated projects. For R, use `renv` per project and
+restore once during setup, not inside hundreds of jobs.
 
-The third layer is _containers_, via Apptainer, for cases where modules
-and user-space environments are not enough — a GLIBC-too-old error,
-complex C/CUDA dependencies, or a published Docker image you need to
-reproduce. Load it with `module load apptainer`. Prefer static or musl
-Linux binaries for small user tools under `~/.local/bin` when available;
-they avoid many `GLIBC_2.xx not found` failures.
+The third layer is _containers_, via Apptainer, for cases modules and
+user-space environments cannot handle: old GLIBC errors, complex C/CUDA
+dependencies, or a published Docker image you need to reproduce. Load it
+with `module load apptainer`. For small user tools under `~/.local/bin`,
+prefer static or musl Linux binaries when available; they avoid many
+`GLIBC_2.xx not found` failures.
 
 #skillref(("installing-software", "running-python", "running-r"))[
   `installing-software` is the umbrella skill; the language-specific
@@ -592,8 +542,9 @@ they avoid many `GLIBC_2.xx not found` failures.
 
 = Running Python
 
-For new Python projects, use `uv` and keep the environment under the
-project code directory:
+For new Python projects, use `uv` and keep the environment inside the
+project code directory. Treat it as part of the project, not as a mysterious
+pet living in `$HOME`:
 
 ```bash
 cd /gpfs/project/<proj>/code
@@ -603,13 +554,14 @@ uv sync --frozen
 ```
 
 Commit `pyproject.toml` and `uv.lock`. Do not commit `.venv/`. Run
-`uv sync --frozen` at setup time on the login node, not inside Slurm
-jobs or arrays; mutating environments in flight is slow, non-reproducible,
-and rough on GPFS metadata. Plain `pip` is not forbidden, but `pip
-install --user` and per-job installs are the bad patterns.
+`uv sync --frozen` during setup on the login node, not inside Slurm jobs or
+arrays. Mutating environments in flight is slow, hard to reproduce, and a
+good way to make GPFS do bookkeeping instead of useful work. Plain `pip` is
+not forbidden; `pip install --user` and per-job installs are the bad
+patterns.
 
-A typical Python sbatch script looks like the following. Note the
-thread-environment block and the `srun .venv/bin/python` launch line:
+A typical Python sbatch script looks like this. Notice the thread exports
+and the `srun .venv/bin/python` launch line:
 
 ```bash
 #!/bin/bash
@@ -633,11 +585,10 @@ cd /gpfs/project/<proj>/code
 srun .venv/bin/python src/main.py
 ```
 
-Use `srun .venv/bin/python ...` for long or resumable jobs so Slurm
-signals reach the Python process. For short exploratory jobs where
-signal-based shutdown does not matter, `uv run python src/main.py` is
-acceptable. In Python itself, read Slurm values with fallbacks so the
-same code works locally and on the cluster:
+Use `srun .venv/bin/python ...` for long or resumable jobs so Slurm signals
+reach Python. For short exploratory jobs where signal-based shutdown does
+not matter, `uv run python src/main.py` is acceptable. In Python, read Slurm
+values with fallbacks so the same code works locally and on the cluster:
 
 ```python
 import os
@@ -648,21 +599,21 @@ job_id = os.environ.get("SLURM_JOB_ID", "local")
 == Why the thread-environment block matters
 
 NumPy, SciPy, scikit-learn, Polars, NumExpr, and much of the scientific
-Python stack call into threaded native libraries. By default, those
-libraries may spawn one thread per CPU they see on the _node_, not per
-CPU you _requested_ from Slurm. The `*_NUM_THREADS` exports pin them to
-exactly the cores Slurm gave you. The `${SLURM_CPUS_PER_TASK:-1}` form
-matters: a bare `$SLURM_CPUS_PER_TASK` is empty outside Slurm.
+Python stack call threaded native libraries. By default, those libraries may
+spawn one thread per CPU they see on the _node_, not per CPU you requested
+from Slurm. The `*_NUM_THREADS` exports pin them to the cores Slurm gave
+you. The `${SLURM_CPUS_PER_TASK:-1}` form matters because a bare
+`$SLURM_CPUS_PER_TASK` is empty outside Slurm.
 
 == Python data defaults and resumable outputs
 
-For tabular work, prefer Polars lazy scans and DuckDB before reaching
-for multiprocessing. Store reusable data as Parquet with compression,
-convert to pandas only at library boundaries, and write one Parquet per
-array task or chunk rather than mutating one large file in place.
+For tabular work, try Polars lazy scans and DuckDB before multiprocessing.
+Store reusable data as compressed Parquet, convert to pandas only at library
+boundaries, and write one Parquet file per array task or chunk instead of
+mutating one large file in place.
 
-Write scripts so each unit of work skips if its output already exists,
-writes to `<name>.tmp`, and renames only after success:
+Write each unit of work so it skips existing outputs, writes to
+`<name>.tmp`, and renames only after success:
 
 ```python
 from pathlib import Path
@@ -686,8 +637,9 @@ tmp.rename(output)
 
 = Running R
 
-R loads through the module system, and job scripts should load it
-explicitly:
+Load R through the module system, and load it explicitly in job scripts. Your
+interactive shell may remember what you loaded yesterday; a batch job does
+not owe you that favor:
 
 ```bash
 module spider r
@@ -695,9 +647,9 @@ module load r
 R --version
 ```
 
-Project-local package management uses `renv`. Initialize and restore on
-the login node during setup, commit `renv.lock` and `.Rprofile`, and do
-not commit `renv/library/`:
+Use `renv` for project-local package management. Initialize and restore on
+the login node during setup, commit `renv.lock` and `.Rprofile`, and do not
+commit `renv/library/`:
 
 ```r
 install.packages("renv")
@@ -706,15 +658,15 @@ renv::install(c("data.table", "arrow", "fixest"))
 renv::snapshot()
 ```
 
-For shared projects, put the renv library under project space by adding
+For shared projects, put the renv library under project space by adding this
 to `.Rprofile`:
 
 ```r
 Sys.setenv(RENV_PATHS_LIBRARY = "/gpfs/project/<proj>/environments/renv/library")
 ```
 
-Run `renv::restore()` once during setup, not inside a Slurm array. A
-typical R sbatch script:
+Run `renv::restore()` once during setup, not inside a Slurm array. A typical
+R sbatch script looks like this:
 
 ```bash
 #!/bin/bash
@@ -747,9 +699,9 @@ n_cpus <- if (nzchar(slurm_cpus)) as.integer(slurm_cpus) else parallel::detectCo
 data.table::setDTthreads(n_cpus)
 ```
 
-For ordinary research code, tidyverse is readable and shareable; switch
-to `data.table` or `dtplyr` when you have measured memory or runtime as
-the bottleneck. Use Arrow + Parquet for reusable data on GPFS.
+For ordinary research code, tidyverse is readable and shareable. Switch to
+`data.table` or `dtplyr` when measured memory or runtime says you should.
+Use Arrow and Parquet for reusable data on GPFS.
 
 #skillref(("running-r",))[
   `running-r` covers `renv` setup, batch invocation, and the BLAS,
@@ -758,9 +710,10 @@ the bottleneck. Use Arrow + Parquet for reusable data on GPFS.
 
 = Running Stata
 
-Stata on the cluster runs in batch mode. Put temporary files on scratch,
-match Stata/MP processors to the Slurm CPU request, and close idle
-sessions because Stata licenses are shared.
+Run Stata on the cluster in batch mode. Put temporary files on scratch, match
+Stata/MP processors to the Slurm CPU request, and close idle sessions because
+Stata licenses are shared. A Stata license left idle is still a seat someone
+else cannot use.
 
 ```bash
 #!/bin/bash
@@ -789,7 +742,7 @@ cd /gpfs/project/<proj>/code
 stata-mp -b do src/main.do
 ```
 
-Use a do-file preamble like:
+Use a do-file preamble like this:
 
 ```stata
 capture log close _all
@@ -805,9 +758,9 @@ di "STATATMP=`statatmp'"
 set more off
 ```
 
-Each Stata array task should write a separate output file. Use
-`compress`, drop unneeded variables before merges, and keep `tempfile`
-intermediates out of `$HOME`.
+Each Stata array task should write a separate output file. Use `compress`,
+drop unneeded variables before merges, and keep `tempfile` intermediates out
+of `$HOME`.
 
 #skillref(("running-stata",))[
   `running-stata` covers batch invocation, log handling, `STATATMP`,
@@ -816,11 +769,10 @@ intermediates out of `$HOME`.
 
 = GPUs
 
-Request a GPU only when your code actively uses CUDA — PyTorch, JAX,
-TensorFlow, RAPIDS, CuPy, or a CUDA kernel you wrote yourself. A GPU
-held by pure-NumPy, Stata, ordinary dataframe work, downloading,
-tokenization, or scraping is the most expensive form of resource
-hoarding on the cluster.
+Request a GPU only when the code actually uses CUDA: PyTorch, JAX,
+TensorFlow, RAPIDS, CuPy, or your own CUDA kernel. A GPU assigned to ordinary
+NumPy, Stata, dataframe work, downloading, tokenization, or scraping is a
+very expensive space heater in the basement, not acceleration.
 
 Start with one GPU:
 
@@ -848,36 +800,35 @@ nvidia-smi --query-gpu=timestamp,utilization.gpu,utilization.memory,memory.used,
 srun .venv/bin/python train.py
 ```
 
-Only request multiple GPUs if the code explicitly uses multiple GPUs.
-Split CPU preprocessing from GPU training: make a CPU job for download,
-cleaning, tokenization, and feature construction, then submit the GPU
-job with `--dependency=afterok:<cpu-jobid>`. If `GPU-Util` stays near
-0%, VRAM is 0 MB, or utilization alternates between idle and saturated,
-cancel and debug before burning more GPU-hours.
+Request multiple GPUs only when the code explicitly uses multiple GPUs.
+Split CPU preprocessing from GPU training: run download, cleaning,
+tokenization, and feature construction as a CPU job, then submit the GPU job
+with `--dependency=afterok:<cpu-jobid>`. If `GPU-Util` stays near 0%, VRAM
+is 0 MB, or utilization alternates between idle and saturated, cancel and
+debug before spending more GPU-hours.
 
-Current rough guide, to be verified with `sinfo`: `gpunormal` contains
-RTX 8000/A100-class GPUs; A100 nodes hold three GPUs. RTX 8000/A40 are
-48 GB nominal, with RTX 8000 reporting roughly 46 GB usable. The `h100`
-partition is one node with four 80 GB H100s and is the scarcest resource
-on the cluster. GPU nodes currently support the CUDA 12.8 runtime, so
-PyTorch/JAX wheels with bundled CUDA often work without `module load
-cuda`; load a CUDA module when you need `nvcc` or a specific toolkit:
+Current rough guide, to be verified with `sinfo`: `gpunormal` contains RTX
+8000/A100-class GPUs; A100 nodes hold three GPUs. RTX 8000/A40 are 48 GB
+nominal, with RTX 8000 reporting roughly 46 GB usable. The `h100` partition
+is one node with four 80 GB H100s and is the scarcest resource on the
+cluster. GPU nodes currently support the CUDA 12.8 runtime, so PyTorch/JAX
+wheels with bundled CUDA often work without `module load cuda`; load a CUDA
+module when you need `nvcc` or a specific toolkit:
 
 ```bash
 module spider cuda
 module load cuda
 ```
 
-`nvidia-smi` only works inside a GPU allocation, not on the login node.
-Use `torch.cuda.is_available()` or equivalent framework checks at the
-start of the training script.
+`nvidia-smi` works inside a GPU allocation, not on the login node. At the
+start of training, also check `torch.cuda.is_available()` or the equivalent
+for your framework.
 
 == The cardinal sin: idle interactive GPUs
 
-The single worst etiquette violation on the cluster is allocating a GPU
-interactively and then leaving it open while you go to lunch, to sleep,
-or to a meeting. Cancel interactive GPU sessions the moment you stop
-typing — `exit` from inside, or `scancel <job-id>` from outside.
+Do not allocate an interactive GPU and then go to lunch, a meeting, or bed.
+Cancel interactive GPU sessions the moment you stop typing: `exit` from
+inside, or `scancel <job-id>` from outside.
 
 #skillref(("using-gpus",))[
   `using-gpus` walks through GPU partition selection, monitoring,
@@ -888,12 +839,12 @@ typing — `exit` from inside, or `scancel <job-id>` from outside.
 
 = Working with large data
 
-If your data fits comfortably in your job's RAM, simple tools are fine.
-Once it stops fitting, query before loading and store reusable data in
-columnar formats. Parquet is smaller and faster than CSV, supports
-column pruning and predicate pushdown, and avoids GPFS metadata storms.
-DuckDB, Polars lazy scans, and Arrow can stream over datasets larger
-than the job's RAM.
+When data fits comfortably in RAM, simple tools are fine. When it does not,
+query before loading and store reusable data in columnar formats. Do not ask
+Python to swallow the whole dataset just to count a few rows. Parquet is
+smaller and faster than CSV, supports column pruning and predicate pushdown,
+and avoids metadata storms. DuckDB, Polars lazy scans, and Arrow can stream
+over datasets larger than the job's RAM.
 
 Inspect files before writing a large script:
 
@@ -949,7 +900,7 @@ result <- ds |>
 write_parquet(result, "/gpfs/project/<proj>/output/sales_by_year.parquet")
 ```
 
-Use SQLite with WAL for small local caches and lookup tables; use one
+Use SQLite with WAL for small local caches and lookup tables. Use one
 connection per process and keep writes single-writer:
 
 ```python
@@ -960,10 +911,9 @@ conn.execute("CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, value TEXT
 conn.commit()
 ```
 
-Always sample first — a 10,000-row sample is enough to debug code,
-estimate memory, and check column names. For arrays, write one Parquet
-per task and combine later with `pl.scan_parquet("output/task_*.parquet")`
-or DuckDB.
+Always sample first. A 10,000-row sample is enough to debug code, estimate
+memory, and check column names. For arrays, write one Parquet file per task
+and combine later with `pl.scan_parquet("output/task_*.parquet")` or DuckDB.
 
 #skillref(("working-with-large-data", "accelerating-python"))[
   `working-with-large-data` covers Parquet conversion, DuckDB, Polars,
@@ -974,14 +924,13 @@ or DuckDB.
 
 = Acquiring data: WRDS, APIs, scraping
 
-When a job downloads data — from WRDS, a REST API, a paid LLM API, or a
-public website — three HPC-specific issues show up that do not exist on
-a laptop: every job shares one outbound IP, downloads are expensive to
-repeat, and credentials must never land in scripts or Git.
+Downloading data from the cluster changes the blast radius. From the outside
+world, many jobs may look like one very busy machine in Evans Hall. Every job
+shares one outbound IP, repeated downloads waste time and money, and
+credentials must never land in scripts or Git.
 
-For WRDS or Postgres, keep connection details in `~/.pg_service.conf`
-and secrets in `~/.pgpass`, both `chmod 600`, then connect by service
-name:
+For WRDS or Postgres, keep connection details in `~/.pg_service.conf` and
+secrets in `~/.pgpass`, both `chmod 600`, then connect by service name:
 
 ```ini
 # ~/.pg_service.conf
@@ -999,12 +948,11 @@ with psycopg.connect("service=wrds") as conn, conn.cursor() as cur:
     rows = cur.fetchall()
 ```
 
-Do not run the same WRDS extract inside every analysis job. Download
-once to project storage, store the raw extract, then analyze local
-Parquet files. When parallel workers share a database, use
-`psycopg_pool.ConnectionPool`, create pools inside worker processes,
-and bound `max_size` deliberately; naive parallelism can exceed WRDS or
-Postgres connection limits.
+Do not run the same WRDS extract inside every analysis job. Download once to
+project storage, keep the raw extract, and analyze local Parquet files. When
+parallel workers share a database, use `psycopg_pool.ConnectionPool`, create
+pools inside worker processes, and set `max_size` deliberately. Naive
+parallelism can exceed WRDS or Postgres connection limits.
 
 ```python
 from psycopg_pool import ConnectionPool
@@ -1018,8 +966,8 @@ def fetch_permno(permno):
         return cur.fetchall()
 ```
 
-Cache paid API calls, web pages, and slow endpoints by a hash of the
-request payload, and write the cache atomically:
+Cache paid API calls, web pages, and slow endpoints by a hash of the request
+payload, and write the cache atomically:
 
 ```python
 import hashlib, json
@@ -1042,8 +990,8 @@ def cached_call(payload: dict):
     return response
 ```
 
-Respect rate limits and `robots.txt`, add retries with exponential
-backoff, and add deliberate sleeps when scraping:
+Respect rate limits and `robots.txt`, add retries with exponential backoff,
+and add deliberate sleeps when scraping:
 
 ```python
 import time, requests
@@ -1061,8 +1009,8 @@ def fetch(url, attempts=5):
         return r
 ```
 
-For paid APIs or LLM calls, enforce a cost cap in code before submitting
-a long job:
+For paid APIs or LLM calls, enforce a cost cap in code before submitting a
+long job:
 
 ```python
 MAX_BUDGET_DOLLARS = 50.0
@@ -1074,7 +1022,7 @@ for request in requests_to_make:
     spent += estimate_cost(result)
 ```
 
-Store raw HTML/JSON responses before parsing so a parser change does
+Store raw HTML or JSON responses before parsing. Then a parser change does
 not force another download.
 
 #skillref(("acquiring-data",))[
@@ -1085,8 +1033,9 @@ not force another download.
 
 = Starting a new project
 
-A reproducible project layout under `/gpfs/project/<proj>/` saves hours
-later. The skeleton we recommend is:
+A predictable project layout under `/gpfs/project/<proj>/` saves future you
+from archaeology. Six months from now, future you will not remember where the
+"final final" CSV went. The recommended skeleton is:
 
 ```text
 /gpfs/project/myproj/
@@ -1108,18 +1057,17 @@ later. The skeleton we recommend is:
 ```
 
 Git tracks `code/` and lockfiles, not data, outputs, logs, caches, or
-environments. A minimal `.gitignore` excludes `.venv/`,
-`renv/library/`, `data/`, `output/`, `logs/`, `cache/`, `.env`, `*.out`,
-and `*.err`. The README should state what the project does, where raw
-data comes from, how to rebuild outputs, and which Slurm script is the
-first test job. A thin `Justfile` or `Makefile` with commands such as
-`setup`, `test`, `submit-test`, and `clean-scratch` is often enough.
+environments. A minimal `.gitignore` excludes `.venv/`, `renv/library/`,
+`data/`, `output/`, `logs/`, `cache/`, `.env`, `*.out`, and `*.err`. The
+README should say what the project does, where raw data comes from, how to
+rebuild outputs, and which Slurm script is the first test job. A thin
+`Justfile` or `Makefile` with targets such as `setup`, `test`,
+`submit-test`, and `clean-scratch` is often enough.
 
-After ingest, make raw data read-only by convention or permission; any
-modified data should be written to `data/derived/`. Outputs should be
-regeneratable — deleting `output/` and re-running should rebuild it.
-Use one Python/R environment per project rather than a shared `$HOME`
-environment.
+After ingest, make raw data read-only by convention or permission. Write
+modified data to `data/derived/`. Outputs should be regeneratable: deleting
+`output/` and rerunning the pipeline should rebuild them. Use one Python or
+R environment per project rather than a shared `$HOME` environment.
 
 #skillref(("starting-a-new-project",))[
   Ask Claude Code to "set up a new project under `/gpfs/project/`" and
@@ -1129,54 +1077,48 @@ environment.
 
 = HPC etiquette
 
-The HPC is shared and `squeue` is public. If you are a poor citizen
-of the cluster, expect emails from colleagues waiting on the
-resources you are holding.
+The HPC is shared, and `squeue` is public. Poor cluster citizenship is not
+abstract; it shows up as colleagues waiting behind resources you are holding.
+On a small cluster, the room may be in the basement, but the queue is very
+visible.
 
-The most expensive form of poor citizenship is letting resources sit
-idle — an interactive session left open overnight, a batch job whose
-24-hour walltime overshoots a 30-minute task, or an interactive GPU
-allocated and then abandoned for a meeting. Cancel idle sessions
-immediately with `scancel <job-id>`; an over-allocation that finishes
-early can be cancelled the same way without waiting for the wallclock
-to catch up.
+The most expensive bad habit is idle allocation: an interactive session left
+open overnight, a 24-hour batch request for a 30-minute task, or an
+interactive GPU abandoned during a meeting. Cancel idle sessions with
+`scancel <job-id>`. If an over-allocated job has already produced what you
+need, cancel it rather than letting the wallclock run out.
 
-Three other patterns matter enough to call out. Do not hog: requesting
-64 CPUs and 256 GB when the job needs 4 and 16 keeps your job in the
-queue longer _and_ blocks others. Do not trash GPFS metadata:
-workflows that write millions of tiny files slow `ls` for every user
-on the cluster, including the sysadmins, and the right counter-pattern
-is Parquet plus tarballs (Section 7). And do not get the cluster
-IP-blocked — every job leaves the network from the same outbound IP,
-so an aggressive scraper or API client breaks downloads for everyone.
+Three other patterns matter. Do not hog: requesting 64 CPUs and 256 GB when
+the job needs 4 CPUs and 16 GB makes your job harder to schedule and blocks
+others. Do not trash GPFS metadata: workflows that write millions of tiny
+files slow the filesystem for everyone; use Parquet and tarballs instead.
+Do not get the cluster IP-blocked: every job leaves the network from the same
+outbound IP, so an aggressive scraper or API client can break downloads for
+everyone.
 
-A practical sub-rule for collaborative work: email `somit@yale.edu`
-for a shared `/gpfs/project/<name>/` folder rather than scattering
-files across personal directories. Shared folders carry proper
-permissions, reduce duplication, and survive when one team member's
-account is offboarded.
+For collaborative work, email `somit@yale.edu` for a shared
+`/gpfs/project/<name>/` folder instead of scattering files across personal
+directories. Shared folders carry proper permissions, reduce duplication,
+and survive when one team member's account is offboarded.
 
 = Working with Claude Code on the HPC
 
 This guide has a companion: the Yale SOM HPC marketplace
-(`yale-som-hpc/claude-code-marketplace`), a Claude Code plugin that
-ships a set of skills — instructions written for the AI — mirroring
-the sections of this document. When you ask Claude Code to do
-something on the cluster, it loads the matching skill and follows the
-conventions encoded there.
+(`yale-som-hpc/claude-code-marketplace`). It is a Claude Code plugin that
+ships skills — instructions written for the AI — matching the sections of
+this document. When you ask Claude Code to work on the cluster, it loads the
+relevant skill and follows the conventions encoded there.
 
-The two artifacts are deliberately complementary. This document
-teaches you, the human, the cluster's mental model and the operational
-rules well enough to read Claude's plans critically and to operate
-without it. The marketplace teaches the AI you delegate to, so that
-when you say "submit this as a Slurm job," Claude already knows about
-thread exports, partition selection, atomic writes, the cardinal sin
-of idle GPUs, and the rest. Neither replaces the other: the human who
-does not understand the cluster cannot evaluate the AI's output, and
-the AI without the marketplace will produce plausible-looking
-instructions that violate cluster conventions.
+The two artifacts do different jobs. This document teaches you the cluster's
+mental model and operating rules, so you can work without Claude and judge
+Claude's plans when you use it. The marketplace teaches the AI those same
+rules, so "submit this as a Slurm job" includes thread exports, partition
+selection, atomic writes, GPU etiquette, and the other details that matter.
+Neither replaces the other. A human who does not understand the cluster
+cannot evaluate the AI's output; an AI without the marketplace can produce
+plausible instructions that violate local conventions.
 
-The map from "I want to..." to which skill loads is given in Table 3.
+Table 3 maps common requests to the skill Claude Code will load.
 
 #figure(
   table(
@@ -1205,8 +1147,8 @@ The map from "I want to..." to which skill loads is given in Table 3.
   kind: table,
 )
 
-For current install instructions, see the marketplace `README.md`.
-The short version, from inside Claude Code:
+For current install instructions, see the marketplace `README.md`. The short
+version, from inside Claude Code, is:
 
 ```
 /plugin marketplace add yale-som-hpc/claude-code-marketplace
@@ -1215,25 +1157,25 @@ The short version, from inside Claude Code:
 
 = Getting help
 
-The commands and contacts you will reach for most often are short
-enough to keep in one place. For job state and history, use `squeue` `--me` for what is running now, `squeue` `--me` `--start` and `scontrol` `show` `job <id>` for diagnosing why something is pending,  and `seff`
-`<id>` together with `sacct -j <id>` for resource usage after a run.
-For partition and node detail, `sinfo -s` is the live view. For
-account, storage, and project-folder requests, email
-`somit@yale.edu`. Reference documentation lives at
-#link("https://slurm.schedmd.com/")[slurm.schedmd.com] for Slurm and
-#link("https://lmod.readthedocs.io/")[lmod.readthedocs.io] for the
-module system, and the marketplace skills serve as a structured
-second source for the operational patterns this guide describes.
+Keep a short command list nearby. For jobs running now, use `squeue --me`.
+For pending jobs, use `squeue --me --start` and `scontrol show job <id>`. For
+post-run resource use, use `seff <id>` and `sacct -j <id>`. For partition and
+node details, use `sinfo -s`. For account, storage, and project-folder
+requests, email `somit@yale.edu`.
+
+Reference documentation lives at #link("https://slurm.schedmd.com/")[slurm.schedmd.com]
+for Slurm and #link("https://lmod.readthedocs.io/")[lmod.readthedocs.io]
+for Lmod. The marketplace skills are a second source for the operational
+patterns in this guide.
 
 #pagebreak()
 
 = Appendix: example files
 
-The files below form a complete first job — a Python script, a Slurm
-submission script, and the commands to submit and inspect the run.
-They are designed to be copied verbatim, run end-to-end, and then
-modified.
+These files form a complete first job: a Python script, a Slurm submission
+script, and the commands to submit and inspect the run. Copy them verbatim,
+run them end to end, and then modify them for your own work. It is a toy job,
+but it walks through the same door as the real ones.
 
 == `fibonacci.py`
 
@@ -1315,4 +1257,4 @@ seff <job-id>
 cat logs/fibonacci_<job-id>.out
 ```
 
-The `seff` call at the end is the habit worth building from day one.
+The `seff` call at the end is the habit to build from day one.
