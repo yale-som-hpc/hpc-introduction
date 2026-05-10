@@ -1,1 +1,10 @@
+.agents
+.agent-sync
 OUTLINE.md
+.env
+logs/
+*.out
+*.err
+*.log
+__pycache__/
+.venv/
